@@ -2,11 +2,64 @@ require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
 const OpenAI = require("openai");
+const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
 app.use(express.json());
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+
+// Fetch products from Supabase
+async function getProducts() {
+  const { data, error } = await supabase
+    .from("products")
+    .select("name, price, original_price, category, brand, in_stock, stock, description")
+    .order("name");
+
+  if (error) {
+    console.error("Supabase error:", error.message);
+    return [];
+  }
+  return data;
+}
+
+// Build system prompt with live product data
+async function buildSystemPrompt() {
+  const products = await getProducts();
+
+  let productList = "No products available.";
+  if (products.length > 0) {
+    productList = products
+      .map((p) => {
+        const price = `₱${Number(p.price).toLocaleString()}`;
+        const origPrice = p.original_price ? ` (orig: ₱${Number(p.original_price).toLocaleString()})` : "";
+        const stock = p.in_stock ? `In stock (${p.stock} pcs)` : "Out of stock";
+        const brand = p.brand ? ` | Brand: ${p.brand}` : "";
+        return `- ${p.name}${brand} | ${price}${origPrice} | ${stock} | Category: ${p.category}`;
+      })
+      .join("\n");
+  }
+
+  return `You are a helpful customer support assistant for RJ MUSIC (rjmusic.shop), a Philippine online store selling musical accessories and studio gear.
+
+Be friendly, concise, and helpful. Answer in the same language the customer uses (Filipino or English).
+
+CURRENT PRODUCTS & STOCK:
+${productList}
+
+STORE INFO:
+- Website: https://rjmusic.shop
+- For orders, direct customers to the website
+- Payment methods: Cash on Delivery (COD) and online payment via PayMongo
+- For order status inquiries, ask for their order number
+
+GUIDELINES:
+- Answer questions about products, availability, prices, and orders
+- If a product is out of stock, inform the customer and suggest checking the website for updates
+- For complex order issues, advise them to contact support through the website
+- Keep replies short and clear`;
+}
 
 // Webhook verification
 app.get("/webhook", (req, res) => {
@@ -40,7 +93,8 @@ app.post("/webhook", async (req, res) => {
     console.log(`Message from ${senderId}: ${userMessage}`);
 
     try {
-      const reply = await getGPTReply(userMessage);
+      const systemPrompt = await buildSystemPrompt();
+      const reply = await getGPTReply(systemPrompt, userMessage);
       await sendMessage(senderId, reply);
     } catch (err) {
       console.error("Error:", err.message);
@@ -48,14 +102,11 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-async function getGPTReply(userMessage) {
+async function getGPTReply(systemPrompt, userMessage) {
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      {
-        role: "system",
-        content: "You are a helpful assistant on Facebook Messenger. Keep replies concise and friendly.",
-      },
+      { role: "system", content: systemPrompt },
       { role: "user", content: userMessage },
     ],
     max_tokens: 500,
