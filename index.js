@@ -266,13 +266,13 @@ app.post("/webhook", async (req, res) => {
                 `Total: ₱${total.toLocaleString()} (incl. ₱${shippingFee} shipping)\n\n` +
                 `Para sa GCash payment, send ₱${total.toLocaleString()} to:\n` +
                 `${gcashNumber} - ${gcashName}\n\n` +
-                `Send screenshot sa aming page para ma-confirm ang payment. Salamat!`;
+                `Please send a screenshot to our page to confirm the payment. Thank you!`;
             } else {
               replyText =
                 `Order confirmed! Order #${orderNumber}\n\n` +
                 `Total: ₱${total.toLocaleString()} (incl. ₱${shippingFee} shipping)\n` +
                 `Payment: Cash on Delivery (COD)\n\n` +
-                `Antayon lang ang tawag/mensahe para sa delivery. Salamat!`;
+                `Please wait for our call or message regarding your delivery. Thank you!`;
             }
 
             // Clear history after order is placed
@@ -326,6 +326,42 @@ async function sendMessage(recipientId, text) {
     }
   );
 }
+
+// Listen for order status changes and notify customers via Messenger
+const STATUS_MESSAGES = {
+  Processing: (name, num) => `Hi ${name}! ✅ Your order #${num} is now being processed and prepared. We'll notify you once it's on the way!`,
+  Shipped:    (name, num) => `Hi ${name}! 🚚 Your order #${num} has been shipped! Antayon lang ang delivery. Salamat sa inyong order!`,
+  Delivered:  (name, num) => `Hi ${name}! 📦 Your order #${num} has been delivered. Salamat! If you have any concerns, feel free to message us.`,
+  Cancelled:  (name, num) => `Hi ${name}. ❌ Your order #${num} has been cancelled. If you have questions, please message us. Salamat!`,
+};
+
+supabase
+  .channel("order-status-changes")
+  .on(
+    "postgres_changes",
+    { event: "UPDATE", schema: "public", table: "orders" },
+    async (payload) => {
+      const newOrder = payload.new;
+      const oldOrder = payload.old;
+
+      if (newOrder.status === oldOrder.status) return;
+      if (!newOrder.fb_sender_id) return;
+
+      const msgFn = STATUS_MESSAGES[newOrder.status];
+      if (!msgFn) return;
+
+      const message = msgFn(newOrder.shipping_name || "Customer", newOrder.order_number);
+      try {
+        await sendMessage(newOrder.fb_sender_id, message);
+        console.log(`Notified ${newOrder.fb_sender_id} → status: ${newOrder.status}`);
+      } catch (err) {
+        console.error("Failed to send order notification:", err.message);
+      }
+    }
+  )
+  .subscribe((status) => {
+    console.log("Order status listener:", status);
+  });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
