@@ -93,7 +93,6 @@ STORE INFO:
 - Website: https://rjmusic.shop (for browsing only)
 - Payment methods: Cash on Delivery (COD) or GCash
 - GCash: ${gcashNumber} (${gcashName})
-- Shipping fee: ₱50 for Balingasag local, ₱150 for nationwide
 
 ORDER PROCESS - You MUST take orders directly here in chat. NEVER redirect customers to the website to order. Follow these steps:
 1. Confirm which product(s) and quantity the customer wants (check if in stock first)
@@ -164,8 +163,9 @@ const tools = [
 // Create order in Supabase
 async function createOrder(orderData) {
   const orderNumber = `MSG-${Date.now().toString().slice(-8)}`;
+  // Balingasag = free local delivery, others = J&T standard rate
   const isLocal = orderData.city.toLowerCase().includes("balingasag");
-  const shippingFee = isLocal ? 50 : 150;
+  const shippingFee = isLocal ? 0 : 105;
   const subtotal = orderData.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const total = subtotal + shippingFee;
 
