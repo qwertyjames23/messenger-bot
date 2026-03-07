@@ -3,7 +3,6 @@ const express = require("express");
 const axios = require("axios");
 const OpenAI = require("openai");
 const { createClient } = require("@supabase/supabase-js");
-const { randomUUID } = require("crypto");
 
 const app = express();
 app.use(express.json());
@@ -83,7 +82,7 @@ async function buildSystemPrompt() {
   const gcashNumber = process.env.GCASH_NUMBER || "[GCash number not set]";
   const gcashName = process.env.GCASH_NAME || "RJ Music";
 
-  return `You are a helpful customer support and sales assistant for RJ MUSIC (rjmusic.shop), a Philippine online store selling musical accessories and studio gear.
+  return `You are a helpful customer support and sales assistant for RJ MUSIC (rjmusic.shop), a musical accessories and studio gear store based in Baliwagan, Balingasag, Misamis Oriental, Philippines.
 
 Be friendly, concise, and helpful. Answer in the same language the customer uses (simple Bisaya, Filipino, or English).
 
@@ -95,14 +94,14 @@ STORE INFO:
 - Payment methods: Cash on Delivery (COD) or GCash
 - GCash: ${gcashNumber} (${gcashName})
 
-ORDER PROCESS - You MUST take orders directly here in chat. NEVER redirect customers to the website to order. Follow these steps IN ORDER, one at a time:
+ORDER PROCESS - You MUST take orders directly here in chat. NEVER redirect customers to the website to order. Follow these steps:
 1. Confirm which product(s) and quantity the customer wants (check if in stock first)
 2. Ask for their full name
-3. Ask for their complete delivery address: street, barangay, city/municipality, province, zip code
+3. Ask for their complete delivery address: house/lot no. and street, barangay, city/municipality, province, zip code
 4. Ask for their contact number
-5. ONLY after all delivery details are complete, ask for payment method: COD or GCash
-6. Show a complete order summary (items, prices, shipping fee, total) then ask the customer to type "Confirm" to place the order or "Cancel" to cancel
-7. ONLY call create_order if the customer types "Confirm" (or similar confirmation)
+5. Ask for payment method: COD or GCash
+6. Show a complete order summary (items, prices, shipping fee, total) and ask for confirmation
+7. After customer confirms, call the create_order function immediately
 
 GUIDELINES:
 - IMPORTANT: Always take orders here in Messenger chat — do NOT tell customers to go to the website to order
@@ -162,9 +161,8 @@ const tools = [
   },
 ];
 
-// Create order in Supabase via SECURITY DEFINER function (bypasses RLS)
+// Create order in Supabase
 async function createOrder(orderData) {
-  const orderId = randomUUID();
   const orderNumber = `MSG-${Date.now().toString().slice(-8)}`;
   // Balingasag = free local delivery, others = J&T standard rate
   const isLocal = orderData.city.toLowerCase().includes("balingasag");
@@ -174,23 +172,43 @@ async function createOrder(orderData) {
 
   const addressLine1 = [orderData.street_address, orderData.barangay].filter(Boolean).join(", ");
 
-  const { error } = await supabase.rpc("create_messenger_order", {
-    p_id: orderId,
-    p_order_number: orderNumber,
-    p_customer_name: orderData.customer_name,
-    p_customer_phone: orderData.contact_number,
-    p_shipping_address_line1: addressLine1,
-    p_shipping_city: orderData.city,
-    p_shipping_state: orderData.province,
-    p_shipping_postal_code: orderData.postal_code,
-    p_subtotal: subtotal,
-    p_shipping_fee: shippingFee,
-    p_total: total,
-    p_payment_method: orderData.payment_method,
-    p_items: orderData.items,
-  });
+  const { data: order, error: orderError } = await supabase
+    .from("orders")
+    .insert({
+      order_number: orderNumber,
+      customer_name: orderData.customer_name,
+      customer_phone: orderData.contact_number,
+      shipping_name: orderData.customer_name,
+      shipping_phone: orderData.contact_number,
+      shipping_address_line1: addressLine1,
+      shipping_city: orderData.city,
+      shipping_state: orderData.province,
+      shipping_postal_code: orderData.postal_code,
+      shipping_country: "Philippines",
+      subtotal,
+      shipping_fee: shippingFee,
+      total,
+      status: "Pending",
+      payment_method: orderData.payment_method,
+      payment_status: "pending",
+      notes: "Order via Facebook Messenger",
+    })
+    .select("id")
+    .single();
 
-  if (error) throw new Error(error.message);
+  if (orderError) throw new Error(orderError.message);
+
+  const orderItems = orderData.items.map((item) => ({
+    order_id: order.id,
+    product_id: item.product_id,
+    product_name: item.product_name,
+    product_price: item.price,
+    quantity: item.quantity,
+    subtotal: item.price * item.quantity,
+  }));
+
+  const { error: itemsError } = await supabase.from("order_items").insert(orderItems);
+  if (itemsError) throw new Error(itemsError.message);
 
   return { orderNumber, total, shippingFee };
 }
@@ -227,9 +245,6 @@ app.post("/webhook", async (req, res) => {
     console.log(`Message from ${senderId}: ${userMessage}`);
 
     try {
-      // Show typing indicator while processing
-      await sendTypingOn(senderId);
-
       const [systemPrompt, history] = await Promise.all([buildSystemPrompt(), getSession(senderId)]);
 
       const messages = [
@@ -300,19 +315,6 @@ app.post("/webhook", async (req, res) => {
     }
   }
 });
-
-async function sendTypingOn(recipientId) {
-  await axios.post(
-    `https://graph.facebook.com/v19.0/me/messages`,
-    {
-      recipient: { id: recipientId },
-      sender_action: "typing_on",
-    },
-    {
-      params: { access_token: process.env.PAGE_ACCESS_TOKEN },
-    }
-  );
-}
 
 async function sendMessage(recipientId, text) {
   await axios.post(
