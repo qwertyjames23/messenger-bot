@@ -24,9 +24,24 @@ async function getProducts() {
   return data;
 }
 
-// Build system prompt with live product data
+// Fetch knowledge entries from Supabase
+async function getKnowledge() {
+  const { data, error } = await supabase
+    .from("knowledge")
+    .select("topic, content")
+    .eq("is_active", true)
+    .order("topic");
+
+  if (error) {
+    console.error("Supabase knowledge error:", error.message);
+    return [];
+  }
+  return data;
+}
+
+// Build system prompt with live product data and knowledge
 async function buildSystemPrompt() {
-  const products = await getProducts();
+  const [products, knowledge] = await Promise.all([getProducts(), getKnowledge()]);
 
   let productList = "No products available.";
   if (products.length > 0) {
@@ -41,17 +56,21 @@ async function buildSystemPrompt() {
       .join("\n");
   }
 
+  let knowledgeSection = "";
+  if (knowledge.length > 0) {
+    knowledgeSection = "\n\nSTORE KNOWLEDGE:\n" + knowledge.map((k) => `- ${k.content}`).join("\n");
+  }
+
   return `You are a helpful customer support assistant for RJ MUSIC (rjmusic.shop), a Philippine online store selling musical accessories and studio gear.
 
-Be friendly, concise, and helpful. Answer in the same language the customer uses (Filipino or English).
+Be friendly, concise, and helpful. Answer in the same language the customer uses (simple Bisaya, Filipino, or English)
 
 CURRENT PRODUCTS & STOCK:
-${productList}
+${productList}${knowledgeSection}
 
 STORE INFO:
 - Website: https://rjmusic.shop
 - For orders, direct customers to the website
-- Payment methods: Cash on Delivery (COD) and online payment via PayMongo
 - For order status inquiries, ask for their order number
 
 GUIDELINES:
