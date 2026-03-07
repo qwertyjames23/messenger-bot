@@ -162,7 +162,7 @@ const tools = [
 ];
 
 // Create order in Supabase
-async function createOrder(orderData) {
+async function createOrder(orderData, fbSenderId) {
   const orderNumber = `MSG-${Date.now().toString().slice(-8)}`;
   // Balingasag = free local delivery, others = J&T standard rate
   const isLocal = orderData.city.toLowerCase().includes("balingasag");
@@ -192,6 +192,7 @@ async function createOrder(orderData) {
       payment_method: orderData.payment_method,
       payment_status: "pending",
       notes: "Order via Facebook Messenger",
+      fb_sender_id: fbSenderId,
     })
     .select("id")
     .single();
@@ -274,7 +275,7 @@ app.post("/webhook", async (req, res) => {
           const orderData = JSON.parse(toolCall.function.arguments);
 
           try {
-            const { orderNumber, total, shippingFee } = await createOrder(orderData);
+            const { orderNumber, total, shippingFee } = await createOrder(orderData, senderId);
 
             if (orderData.payment_method === "gcash") {
               const gcashNumber = process.env.GCASH_NUMBER || "[GCash number]";
