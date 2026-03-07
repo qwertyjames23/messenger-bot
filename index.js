@@ -3,6 +3,7 @@ const express = require("express");
 const axios = require("axios");
 const OpenAI = require("openai");
 const { createClient } = require("@supabase/supabase-js");
+const { randomUUID } = require("crypto");
 
 const app = express();
 app.use(express.json());
@@ -163,7 +164,7 @@ const tools = [
 
 // Create order in Supabase
 async function createOrder(orderData) {
-  const orderId = crypto.randomUUID();
+  const orderId = randomUUID();
   const orderNumber = `MSG-${Date.now().toString().slice(-8)}`;
   // Balingasag = free local delivery, others = J&T standard rate
   const isLocal = orderData.city.toLowerCase().includes("balingasag");
