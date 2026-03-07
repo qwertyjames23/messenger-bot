@@ -161,10 +161,11 @@ const tools = [
   },
 ];
 
-// Create order in Supabase
+// Create order in Supabase via SECURITY DEFINER RPC (bypasses RLS)
 async function createOrder(orderData, fbSenderId) {
+  const { randomUUID } = require("crypto");
+  const orderId = randomUUID();
   const orderNumber = `MSG-${Date.now().toString().slice(-8)}`;
-  // Balingasag = free local delivery, others = J&T standard rate
   const isLocal = orderData.city.toLowerCase().includes("balingasag");
   const shippingFee = isLocal ? 0 : 105;
   const subtotal = orderData.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -172,44 +173,24 @@ async function createOrder(orderData, fbSenderId) {
 
   const addressLine1 = [orderData.street_address, orderData.barangay].filter(Boolean).join(", ");
 
-  const { data: order, error: orderError } = await supabase
-    .from("orders")
-    .insert({
-      order_number: orderNumber,
-      customer_name: orderData.customer_name,
-      customer_phone: orderData.contact_number,
-      shipping_name: orderData.customer_name,
-      shipping_phone: orderData.contact_number,
-      shipping_address_line1: addressLine1,
-      shipping_city: orderData.city,
-      shipping_state: orderData.province,
-      shipping_postal_code: orderData.postal_code,
-      shipping_country: "Philippines",
-      subtotal,
-      shipping_fee: shippingFee,
-      total,
-      status: "Pending",
-      payment_method: orderData.payment_method,
-      payment_status: "pending",
-      notes: "Order via Facebook Messenger",
-      fb_sender_id: fbSenderId,
-    })
-    .select("id")
-    .single();
+  const { error } = await supabase.rpc("create_messenger_order", {
+    p_id: orderId,
+    p_order_number: orderNumber,
+    p_customer_name: orderData.customer_name,
+    p_customer_phone: orderData.contact_number,
+    p_shipping_address_line1: addressLine1,
+    p_shipping_city: orderData.city,
+    p_shipping_state: orderData.province,
+    p_shipping_postal_code: orderData.postal_code,
+    p_subtotal: subtotal,
+    p_shipping_fee: shippingFee,
+    p_total: total,
+    p_payment_method: orderData.payment_method,
+    p_items: orderData.items,
+    p_fb_sender_id: fbSenderId,
+  });
 
-  if (orderError) throw new Error(orderError.message);
-
-  const orderItems = orderData.items.map((item) => ({
-    order_id: order.id,
-    product_id: item.product_id,
-    product_name: item.product_name,
-    product_price: item.price,
-    quantity: item.quantity,
-    subtotal: item.price * item.quantity,
-  }));
-
-  const { error: itemsError } = await supabase.from("order_items").insert(orderItems);
-  if (itemsError) throw new Error(itemsError.message);
+  if (error) throw new Error(error.message);
 
   return { orderNumber, total, shippingFee };
 }
