@@ -163,6 +163,7 @@ const tools = [
 
 // Create order in Supabase
 async function createOrder(orderData) {
+  const orderId = crypto.randomUUID();
   const orderNumber = `MSG-${Date.now().toString().slice(-8)}`;
   // Balingasag = free local delivery, others = J&T standard rate
   const isLocal = orderData.city.toLowerCase().includes("balingasag");
@@ -172,9 +173,10 @@ async function createOrder(orderData) {
 
   const addressLine1 = [orderData.street_address, orderData.barangay].filter(Boolean).join(", ");
 
-  const { data: order, error: orderError } = await supabase
+  const { error: orderError } = await supabase
     .from("orders")
     .insert({
+      id: orderId,
       order_number: orderNumber,
       customer_name: orderData.customer_name,
       customer_phone: orderData.contact_number,
@@ -192,14 +194,12 @@ async function createOrder(orderData) {
       payment_method: orderData.payment_method,
       payment_status: "pending",
       notes: "Order via Facebook Messenger",
-    })
-    .select("id")
-    .single();
+    });
 
   if (orderError) throw new Error(orderError.message);
 
   const orderItems = orderData.items.map((item) => ({
-    order_id: order.id,
+    order_id: orderId,
     product_id: item.product_id,
     product_name: item.product_name,
     product_price: item.price,
