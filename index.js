@@ -109,12 +109,38 @@ GUIDELINES:
 - Do NOT call create_order until the customer explicitly confirms the order summary
 - Do not allow ordering out-of-stock items
 - For GCash orders: after confirming, instruct customer to send payment to GCash ${gcashNumber} (${gcashName}) and send a screenshot as proof
-- For order status inquiries, ask for their order number
+- For order status inquiries, ask for their order number then immediately call check_order_status to get real-time status
 - Keep replies short and clear`;
+}
+
+// Check order status from Supabase
+async function checkOrderStatus(orderNumber) {
+  const { data, error } = await supabase
+    .from("orders")
+    .select("order_number, shipping_name, status, payment_status, payment_method, total, shipping_fee, created_at, order_items(product_name, quantity, subtotal)")
+    .ilike("order_number", orderNumber.trim())
+    .single();
+
+  if (error || !data) return null;
+  return data;
 }
 
 // OpenAI function definition for placing orders
 const tools = [
+  {
+    type: "function",
+    function: {
+      name: "check_order_status",
+      description: "Check the status of a customer's order using their order number",
+      parameters: {
+        type: "object",
+        properties: {
+          order_number: { type: "string", description: "The order number provided by the customer" },
+        },
+        required: ["order_number"],
+      },
+    },
+  },
   {
     type: "function",
     function: {
@@ -252,7 +278,39 @@ app.post("/webhook", async (req, res) => {
       if (choice.finish_reason === "tool_calls") {
         const toolCall = choice.message.tool_calls[0];
 
-        if (toolCall.function.name === "create_order") {
+        if (toolCall.function.name === "check_order_status") {
+          const { order_number } = JSON.parse(toolCall.function.arguments);
+          const order = await checkOrderStatus(order_number);
+
+          if (!order) {
+            replyText = `Sorry, dili nako makit-an ang order number "${order_number}". Please double-check ang order number ug try again.`;
+          } else {
+            const statusEmoji = {
+              Pending: "🕐", Processing: "⚙️", Shipped: "🚚", Delivered: "✅", Cancelled: "❌",
+            }[order.status] || "📦";
+
+            const itemsList = order.order_items
+              .map((i) => `  • ${i.product_name} x${i.quantity} — ₱${Number(i.subtotal).toLocaleString()}`)
+              .join("\n");
+
+            replyText =
+              `${statusEmoji} Order #${order.order_number}\n` +
+              `Status: ${order.status}\n` +
+              `Payment: ${order.payment_status.toUpperCase()} (${order.payment_method.toUpperCase()})\n\n` +
+              `Items:\n${itemsList}\n\n` +
+              `Shipping: ₱${Number(order.shipping_fee).toLocaleString()}\n` +
+              `Total: ₱${Number(order.total).toLocaleString()}\n\n` +
+              `Order Date: ${new Date(order.created_at).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })}`;
+          }
+
+          const updatedHistory = [
+            ...history.slice(-18),
+            { role: "user", content: userMessage },
+            { role: "assistant", content: replyText },
+          ];
+          await saveSession(senderId, updatedHistory);
+
+        } else if (toolCall.function.name === "create_order") {
           const orderData = JSON.parse(toolCall.function.arguments);
 
           try {
