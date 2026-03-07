@@ -100,8 +100,8 @@ ORDER PROCESS - You MUST take orders directly here in chat. NEVER redirect custo
 3. Ask for their complete delivery address: street, barangay, city/municipality, province, zip code
 4. Ask for their contact number
 5. ONLY after all delivery details are complete, ask for payment method: COD or GCash
-6. Show a complete order summary (items, prices, shipping fee, total) and ask for confirmation
-7. After customer confirms, call the create_order function immediately
+6. Show a complete order summary (items, prices, shipping fee, total) then ask the customer to type "Confirm" to place the order or "Cancel" to cancel
+7. ONLY call create_order if the customer types "Confirm" (or similar confirmation)
 
 GUIDELINES:
 - IMPORTANT: Always take orders here in Messenger chat — do NOT tell customers to go to the website to order
