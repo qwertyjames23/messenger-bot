@@ -245,6 +245,9 @@ app.post("/webhook", async (req, res) => {
     console.log(`Message from ${senderId}: ${userMessage}`);
 
     try {
+      // Show typing indicator while processing
+      await sendTypingOn(senderId);
+
       const [systemPrompt, history] = await Promise.all([buildSystemPrompt(), getSession(senderId)]);
 
       const messages = [
@@ -315,6 +318,19 @@ app.post("/webhook", async (req, res) => {
     }
   }
 });
+
+async function sendTypingOn(recipientId) {
+  await axios.post(
+    `https://graph.facebook.com/v19.0/me/messages`,
+    {
+      recipient: { id: recipientId },
+      sender_action: "typing_on",
+    },
+    {
+      params: { access_token: process.env.PAGE_ACCESS_TOKEN },
+    }
+  );
+}
 
 async function sendMessage(recipientId, text) {
   await axios.post(
