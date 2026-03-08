@@ -113,6 +113,33 @@ GUIDELINES:
 - Keep replies short and clear`;
 }
 
+// Get saved customer profile
+async function getCustomerProfile(fbSenderId) {
+  const { data } = await supabase
+    .from("customer_profiles")
+    .select("*")
+    .eq("fb_sender_id", fbSenderId)
+    .single();
+  return data || null;
+}
+
+// Save/update customer profile after order
+async function saveCustomerProfile(fbSenderId, orderData) {
+  await supabase
+    .from("customer_profiles")
+    .upsert({
+      fb_sender_id: fbSenderId,
+      name: orderData.customer_name,
+      phone: orderData.contact_number,
+      street_address: orderData.street_address,
+      barangay: orderData.barangay,
+      city: orderData.city,
+      province: orderData.province,
+      postal_code: orderData.postal_code,
+      updated_at: new Date().toISOString(),
+    });
+}
+
 // Check order status from Supabase
 async function checkOrderStatus(orderNumber) {
   const { data, error } = await supabase
@@ -256,11 +283,25 @@ app.post("/webhook", async (req, res) => {
       // Show typing indicator while processing
       await sendTypingOn(senderId);
 
-      const [systemPrompt, history] = await Promise.all([buildSystemPrompt(), getSession(senderId)]);
+      const [systemPrompt, history, customerProfile] = await Promise.all([
+        buildSystemPrompt(),
+        getSession(senderId),
+        getCustomerProfile(senderId),
+      ]);
+
+      // Append saved profile to system prompt if exists
+      let fullSystemPrompt = systemPrompt;
+      if (customerProfile) {
+        fullSystemPrompt += `\n\nSAVED CUSTOMER PROFILE (from previous order):
+- Name: ${customerProfile.name}
+- Phone: ${customerProfile.phone}
+- Address: ${customerProfile.street_address}, ${customerProfile.barangay}, ${customerProfile.city}, ${customerProfile.province} ${customerProfile.postal_code}
+
+When taking a new order, show the customer their saved details and ask: "Gamiton ba nato ang inyong nauna nga delivery details? (Yes/No)". If yes, use these saved details directly. If no, ask for the new details one at a time.`;
 
       const messages = [
-        { role: "system", content: systemPrompt },
-        ...history.slice(-20), // keep last 20 messages for context
+        { role: "system", content: fullSystemPrompt },
+        ...history.slice(-20),
         { role: "user", content: userMessage },
       ];
 
@@ -332,6 +373,9 @@ app.post("/webhook", async (req, res) => {
                 `Payment: Cash on Delivery (COD)\n\n` +
                 `Please wait for our call or message regarding your delivery. Thank you!`;
             }
+
+            // Save customer profile for future orders
+            await saveCustomerProfile(senderId, orderData);
 
             // Clear history after order is placed
             await saveSession(senderId, []);
