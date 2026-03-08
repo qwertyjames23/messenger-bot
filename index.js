@@ -262,6 +262,21 @@ app.get("/webhook", (req, res) => {
   }
 });
 
+// Deduplication: track recently processed message IDs
+const processedMids = new Map(); // mid -> timestamp
+const MID_TTL_MS = 60000; // 60 seconds
+
+function isDuplicate(mid) {
+  const now = Date.now();
+  // Clean up old entries
+  for (const [key, ts] of processedMids) {
+    if (now - ts > MID_TTL_MS) processedMids.delete(key);
+  }
+  if (processedMids.has(mid)) return true;
+  processedMids.set(mid, now);
+  return false;
+}
+
 // Receive messages
 app.post("/webhook", async (req, res) => {
   const body = req.body;
@@ -273,6 +288,12 @@ app.post("/webhook", async (req, res) => {
   for (const entry of body.entry) {
     const event = entry.messaging[0];
     if (!event?.message?.text) continue;
+
+    const mid = event.message.mid;
+    if (mid && isDuplicate(mid)) {
+      console.log(`Duplicate message ignored: ${mid}`);
+      continue;
+    }
 
     const senderId = event.sender.id;
     const userMessage = event.message.text;
@@ -298,6 +319,7 @@ app.post("/webhook", async (req, res) => {
 - Address: ${customerProfile.street_address}, ${customerProfile.barangay}, ${customerProfile.city}, ${customerProfile.province} ${customerProfile.postal_code}
 
 When taking a new order, show the customer their saved details and ask: "Gamiton ba nato ang inyong nauna nga delivery details? (Yes/No)". If yes, use these saved details directly. If no, ask for the new details one at a time.`;
+      }
 
       const messages = [
         { role: "system", content: fullSystemPrompt },
