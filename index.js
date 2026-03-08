@@ -318,7 +318,16 @@ app.post("/webhook", async (req, res) => {
 - Phone: ${customerProfile.phone}
 - Address: ${customerProfile.street_address}, ${customerProfile.barangay}, ${customerProfile.city}, ${customerProfile.province} ${customerProfile.postal_code}
 
-When taking a new order, show the customer their saved details and ask: "Gamiton ba nato ang inyong nauna nga delivery details? (Yes/No)". If yes, use these saved details directly. If no, ask for the new details one at a time.`;
+IMPORTANT RULE FOR SAVED PROFILE:
+When taking a new order, show the customer their saved details and ask ONCE: "Gamiton ba nato ang inyong nauna nga delivery details? (Yes/No)"
+
+If the customer says YES (or "yes", "oo", "sige", "ok", "same", "yes na"):
+- DO NOT ask for name, address, or phone number again
+- Use the saved details above directly
+- Proceed immediately to asking ONLY for the payment method (COD or GCash)
+
+If the customer says NO:
+- Ask for new name, address, and phone one at a time`;
       }
 
       const messages = [
