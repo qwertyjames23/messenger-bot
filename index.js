@@ -453,10 +453,10 @@ async function sendMessage(recipientId, text) {
 
 // Listen for order status changes and notify customers via Messenger
 const STATUS_MESSAGES = {
-  Processing: (name, num) => `Hi ${name}! ✅ Your order #${num} is now being processed and prepared. We'll notify you once it's on the way!`,
-  Shipped:    (name, num) => `Hi ${name}! 🚚 Your order #${num} has been shipped! Antayon lang ang delivery. Salamat sa inyong order!`,
-  Delivered:  (name, num) => `Hi ${name}! 📦 Your order #${num} has been delivered. Salamat! If you have any concerns, feel free to message us.`,
-  Cancelled:  (name, num) => `Hi ${name}. ❌ Your order #${num} has been cancelled. If you have questions, please message us. Salamat!`,
+  Processing: (name, num) => `Hi ${name}! Your order #${num} is now being processed. We will notify you once it has been shipped. Thank you for ordering from RJ Music Shop!`,
+  Shipped:    (name, num) => `Hi ${name}! Your order #${num} has been shipped and is now on the way. Please wait for updates from the courier.`,
+  Delivered:  (name, num) => `Hi ${name}! Your order #${num} has been delivered. Thank you for purchasing from RJ Music Shop!`,
+  Cancelled:  (name, num) => `Hi ${name}. Your order #${num} has been cancelled. Please message us if you need assistance.`,
 };
 
 supabase
