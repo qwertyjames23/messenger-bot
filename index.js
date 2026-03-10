@@ -14,11 +14,26 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 async function getProducts() {
   const { data, error } = await supabase
     .from("products")
-    .select("id, name, price, original_price, category, brand, in_stock, stock")
+    .select("id, name, price, original_price, category, brand, in_stock, stock, has_variants")
     .order("name");
 
   if (error) {
     console.error("Supabase error:", error.message);
+    return [];
+  }
+  return data;
+}
+
+// Fetch active product variants from Supabase
+async function getVariants() {
+  const { data, error } = await supabase
+    .from("product_variants")
+    .select("id, product_id, label, price, stock, variant_type, is_active")
+    .eq("is_active", true)
+    .order("sort_order");
+
+  if (error) {
+    console.error("Supabase variants error:", error.message);
     return [];
   }
   return data;
@@ -59,17 +74,34 @@ async function saveSession(fbSenderId, history) {
 
 // Build system prompt with live product data and knowledge
 async function buildSystemPrompt() {
-  const [products, knowledge] = await Promise.all([getProducts(), getKnowledge()]);
+  const [products, knowledge, variants] = await Promise.all([getProducts(), getKnowledge(), getVariants()]);
+
+  // Group variants by product_id
+  const variantsByProduct = {};
+  for (const v of variants) {
+    if (!variantsByProduct[v.product_id]) variantsByProduct[v.product_id] = [];
+    variantsByProduct[v.product_id].push(v);
+  }
 
   let productList = "No products available.";
   if (products.length > 0) {
     productList = products
       .map((p) => {
-        const price = `₱${Number(p.price).toLocaleString()}`;
-        const origPrice = p.original_price ? ` (orig: ₱${Number(p.original_price).toLocaleString()})` : "";
-        const stock = p.in_stock ? `In stock (${p.stock} pcs)` : "Out of stock";
         const brand = p.brand ? ` | Brand: ${p.brand}` : "";
-        return `- [ID:${p.id}] ${p.name}${brand} | ${price}${origPrice} | ${stock} | Category: ${p.category}`;
+        const productVariants = variantsByProduct[p.id] || [];
+
+        if (p.has_variants && productVariants.length > 0) {
+          const variantLines = productVariants.map((v) => {
+            const vStock = v.stock > 0 ? `In stock (${v.stock} pcs)` : "Out of stock";
+            return `  - [VAR-ID:${v.id}] ${v.variant_type ? v.variant_type + ": " : ""}${v.label} | ₱${Number(v.price).toLocaleString()} | ${vStock}`;
+          }).join("\n");
+          return `- [ID:${p.id}] ${p.name}${brand} | Category: ${p.category} | HAS VARIATIONS:\n${variantLines}`;
+        } else {
+          const price = `₱${Number(p.price).toLocaleString()}`;
+          const origPrice = p.original_price ? ` (orig: ₱${Number(p.original_price).toLocaleString()})` : "";
+          const stock = p.in_stock ? `In stock (${p.stock} pcs)` : "Out of stock";
+          return `- [ID:${p.id}] ${p.name}${brand} | ${price}${origPrice} | ${stock} | Category: ${p.category}`;
+        }
       })
       .join("\n");
   }
@@ -95,7 +127,7 @@ STORE INFO:
 - GCash: ${gcashNumber} (${gcashName})
 
 ORDER PROCESS - You MUST take orders directly here in chat. NEVER redirect customers to the website to order. Ask ONE piece of information at a time — wait for the customer's answer before asking the next question:
-1. Confirm which product(s) and quantity the customer wants (check if in stock first)
+1. Confirm which product(s) the customer wants. If the product HAS VARIATIONS, show the available variants with prices and ask which variation they want — wait for answer. Then ask quantity.
 2. Ask for their full name only — wait for answer
 3. Ask for their complete delivery address only (house/lot no., street, barangay, city, province, zip code) — wait for answer
 4. Ask for their contact number only — wait for answer
@@ -193,6 +225,8 @@ const tools = [
                 product_name: { type: "string" },
                 price: { type: "number" },
                 quantity: { type: "integer" },
+                variant_id: { type: "string", description: "Variant ID if product has variations (VAR-ID)" },
+                variant_label: { type: "string", description: "Variant label e.g. 'Light 10-47'" },
               },
               required: ["product_id", "product_name", "price", "quantity"],
             },
@@ -221,6 +255,12 @@ async function createOrder(orderData, fbSenderId) {
   const orderNumber = `MSG-${Date.now().toString().slice(-8)}`;
   const isLocal = orderData.city.toLowerCase().includes("balingasag");
   const shippingFee = isLocal ? 0 : 105;
+  // Include variant label in product name if applicable
+  orderData.items = orderData.items.map((item) =>
+    item.variant_label
+      ? { ...item, product_name: `${item.product_name} (${item.variant_label})` }
+      : item
+  );
   const subtotal = orderData.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const total = subtotal + shippingFee;
 
