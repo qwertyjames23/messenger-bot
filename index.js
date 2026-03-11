@@ -489,7 +489,21 @@ async function sendTypingOn(recipientId) {
   );
 }
 
+async function sendTypingOff(recipientId) {
+  await axios.post(
+    `https://graph.facebook.com/v19.0/me/messages`,
+    {
+      recipient: { id: recipientId },
+      sender_action: "typing_off",
+    },
+    {
+      params: { access_token: process.env.PAGE_ACCESS_TOKEN },
+    }
+  );
+}
+
 async function sendMessage(recipientId, text) {
+  await sendTypingOff(recipientId);
   await axios.post(
     `https://graph.facebook.com/v19.0/me/messages`,
     {
