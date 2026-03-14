@@ -592,33 +592,47 @@ const STATUS_MESSAGES = {
   Cancelled:  (name, num) => `Hi ${name}. Your order #${num} has been cancelled. Please message us if you need assistance.`,
 };
 
-supabase
-  .channel("order-status-changes")
-  .on(
-    "postgres_changes",
-    { event: "UPDATE", schema: "public", table: "orders" },
-    async (payload) => {
-      const newOrder = payload.new;
-      const oldOrder = payload.old;
+let orderStatusChannel = null;
 
-      if (newOrder.status === oldOrder.status) return;
-      if (!newOrder.fb_sender_id) return;
+function subscribeOrderStatus() {
+  if (orderStatusChannel) {
+    supabase.removeChannel(orderStatusChannel);
+  }
 
-      const msgFn = STATUS_MESSAGES[newOrder.status];
-      if (!msgFn) return;
+  orderStatusChannel = supabase
+    .channel("order-status-changes")
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "orders" },
+      async (payload) => {
+        const newOrder = payload.new;
+        const oldOrder = payload.old;
 
-      const message = msgFn(newOrder.shipping_name || "Customer", newOrder.order_number);
-      try {
-        await sendMessage(newOrder.fb_sender_id, message);
-        console.log(`Notified ${newOrder.fb_sender_id} → status: ${newOrder.status}`);
-      } catch (err) {
-        console.error("Failed to send order notification:", err.message);
+        if (newOrder.status === oldOrder.status) return;
+        if (!newOrder.fb_sender_id) return;
+
+        const msgFn = STATUS_MESSAGES[newOrder.status];
+        if (!msgFn) return;
+
+        const message = msgFn(newOrder.shipping_name || "Customer", newOrder.order_number);
+        try {
+          await sendMessage(newOrder.fb_sender_id, message);
+          console.log(`Notified ${newOrder.fb_sender_id} → status: ${newOrder.status}`);
+        } catch (err) {
+          console.error("Failed to send order notification:", err.message);
+        }
       }
-    }
-  )
-  .subscribe((status) => {
-    console.log("Order status listener:", status);
-  });
+    )
+    .subscribe((status) => {
+      console.log("Order status listener:", status);
+      if (status === "CLOSED" || status === "TIMED_OUT") {
+        console.log("Reconnecting order status listener in 5s...");
+        setTimeout(subscribeOrderStatus, 5000);
+      }
+    });
+}
+
+subscribeOrderStatus();
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
