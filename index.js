@@ -317,6 +317,64 @@ function isDuplicate(mid) {
   return false;
 }
 
+// Comment keyword → product name mapping
+const COMMENT_KEYWORDS = {
+  "capo":           "Classic Guitar Capo",
+  "elixir":         "Elixir Guitar Strings",
+  "elixir acoustic":"Elixir Acoustic Guitar Strings",
+  "elixir electric":"Elixir Nanoweb Nickel Plated Steel Electric Guitar Strings",
+  "picks":          "Guitar Picks",
+  "pick":           "Guitar Picks",
+  "hanger":         "Guitar Hanger Hook Holder Wall",
+  "irig":           "Irig",
+  "tuner":          "Joyo Guitar Tuner JT-01",
+  "joyo":           "Joyo Guitar Tuner JT-01",
+};
+
+async function replyToComment(commentId, message) {
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v19.0/${commentId}/comments`,
+      { message },
+      { params: { access_token: process.env.PAGE_ACCESS_TOKEN } }
+    );
+  } catch (err) {
+    console.error("Error replying to comment:", err.message);
+  }
+}
+
+async function handleComment(change) {
+  const value = change.value;
+  if (value?.item !== "comment" || value?.verb !== "add") return;
+
+  const commentText = (value.message || "").trim().toLowerCase();
+  const commentId = value.comment_id;
+  const senderId = value.from?.id;
+  const senderName = value.from?.name || "there";
+
+  if (!senderId || !commentId) return;
+
+  // Check if comment matches any keyword
+  const matchedProduct = Object.entries(COMMENT_KEYWORDS).find(([keyword]) =>
+    commentText === keyword || commentText.includes(keyword)
+  );
+
+  if (!matchedProduct) return;
+
+  const [, productName] = matchedProduct;
+  console.log(`Comment keyword match: "${commentText}" → ${productName} from ${senderName} (${senderId})`);
+
+  // Reply to comment
+  await replyToComment(commentId, `Hi ${senderName}! Sending you a private message now 📩`);
+
+  // Send DM to start order flow
+  await sendTypingOn(senderId);
+  await sendMessage(
+    senderId,
+    `Hi ${senderName}! 👋 Nakita namo ang imong comment. Gusto nimo mag-order og ${productName}?\n\nI-type lang ang quantity ug delivery details para ma-process namo ang imong order! 😊`
+  );
+}
+
 // Receive messages
 app.post("/webhook", async (req, res) => {
   const body = req.body;
@@ -326,7 +384,17 @@ app.post("/webhook", async (req, res) => {
   res.sendStatus(200); // Respond fast to Facebook
 
   for (const entry of body.entry) {
-    const event = entry.messaging[0];
+    // Handle comment events (feed changes)
+    if (entry.changes) {
+      for (const change of entry.changes) {
+        if (change.field === "feed") {
+          await handleComment(change);
+        }
+      }
+      continue;
+    }
+
+    const event = entry.messaging?.[0];
     if (!event?.message?.text) continue;
 
     const mid = event.message.mid;
