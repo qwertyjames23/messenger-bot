@@ -593,10 +593,13 @@ const STATUS_MESSAGES = {
 };
 
 let orderStatusChannel = null;
+let reconnectDelay = 5000;
+const MAX_RECONNECT_DELAY = 60000;
 
 function subscribeOrderStatus() {
   if (orderStatusChannel) {
     supabase.removeChannel(orderStatusChannel);
+    orderStatusChannel = null;
   }
 
   orderStatusChannel = supabase
@@ -625,9 +628,12 @@ function subscribeOrderStatus() {
     )
     .subscribe((status) => {
       console.log("Order status listener:", status);
-      if (status === "CLOSED" || status === "TIMED_OUT") {
-        console.log("Reconnecting order status listener in 5s...");
-        setTimeout(subscribeOrderStatus, 5000);
+      if (status === "SUBSCRIBED") {
+        reconnectDelay = 5000; // reset on success
+      } else if (status === "CLOSED" || status === "TIMED_OUT") {
+        console.log(`Reconnecting order status listener in ${reconnectDelay / 1000}s...`);
+        setTimeout(subscribeOrderStatus, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY); // exponential backoff
       }
     });
 }
