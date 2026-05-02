@@ -10,6 +10,31 @@ app.use(express.json());
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
+// Default identity (rjmusic fallback when CLIENT_CONFIG_ID is not set)
+const DEFAULT_BUSINESS = {
+  name: "RJ MUSIC",
+  website: "rjmusic.shop",
+  location: "Baliwagan, Balingasag, Misamis Oriental, Philippines",
+};
+
+let clientBusiness = null;
+
+async function loadClientConfig() {
+  const configId = process.env.CLIENT_CONFIG_ID;
+  if (!configId) return;
+  const { data, error } = await supabase
+    .from("botforge_configs")
+    .select("config_json")
+    .eq("id", configId)
+    .single();
+  if (error) {
+    console.error("Failed to load client config:", error.message);
+    return;
+  }
+  clientBusiness = data.config_json.business;
+  console.log(`Loaded client config for: ${clientBusiness.name}`);
+}
+
 // Fetch products from Supabase
 async function getProducts() {
   const { data, error } = await supabase
@@ -114,7 +139,9 @@ async function buildSystemPrompt() {
   const gcashNumber = process.env.GCASH_NUMBER || "[GCash number not set]";
   const gcashName = process.env.GCASH_NAME || "RJ Music";
 
-  return `You are a helpful customer support and sales assistant for RJ MUSIC (rjmusic.shop), a musical accessories and studio gear store based in Baliwagan, Balingasag, Misamis Oriental, Philippines.
+  const biz = clientBusiness || DEFAULT_BUSINESS;
+
+  return `You are a helpful customer support and sales assistant for ${biz.name} (${biz.website}), a store based in ${biz.location}.
 
 Be friendly, concise, and helpful. Answer in the same language the customer uses (simple Bisaya, Filipino, or English).
 
@@ -122,7 +149,7 @@ CURRENT PRODUCTS & STOCK:
 ${productList}${knowledgeSection}
 
 STORE INFO:
-- Website: https://rjmusic.shop (for browsing only)
+- Website: https://${biz.website} (for browsing only)
 - Payment methods: Cash on Delivery (COD) or GCash
 - GCash: ${gcashNumber} (${gcashName})
 
@@ -137,7 +164,7 @@ ORDER PROCESS - You MUST take orders directly here in chat. NEVER redirect custo
 
 GUIDELINES:
 - IMPORTANT: Always take orders here in Messenger chat — do NOT tell customers to go to the website to order
-- At the very start of a new conversation (first message only), briefly introduce yourself as RJ Music's automated assistant/chatbot so the customer knows they are talking to a bot, not a human
+- At the very start of a new conversation (first message only), briefly introduce yourself as ${biz.name}'s automated assistant/chatbot so the customer knows they are talking to a bot, not a human
 - Do NOT call create_order until the customer explicitly confirms the order summary
 - Do not allow ordering out-of-stock items
 - For GCash orders: after confirming, instruct customer to send payment to GCash ${gcashNumber} (${gcashName}) and send a screenshot as proof
@@ -641,6 +668,8 @@ function subscribeOrderStatus() {
 subscribeOrderStatus();
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Bot running on port ${PORT}`);
+loadClientConfig().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Bot running on port ${PORT}`);
+  });
 });
